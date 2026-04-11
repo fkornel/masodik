@@ -1,0 +1,16 @@
+{
+  "model": "gpt-oss-20b-int4-ov",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Szia! Adj egy rovid magyar valaszt streamkent."
+        }
+      ]
+    }
+  ],
+  "stream": true,
+  "max_tokens": 64
+}

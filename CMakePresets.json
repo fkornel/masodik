@@ -1,0 +1,41 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 26,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "local-msvc-ninja",
+      "displayName": "Local MSVC Ninja",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_CXX_COMPILER": "C:/Program Files (x86)/Microsoft Visual Studio/18/BuildTools/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/cl.exe",
+        "CMAKE_MAKE_PROGRAM": "C:/Program Files (x86)/Microsoft Visual Studio/18/BuildTools/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe",
+        "OpenVINO_DIR": "C:/Users/jezus/AppData/Local/Programs/AI Playground/resources/OpenVINO/.venv/Lib/site-packages/openvino/cmake",
+        "MASODIK_ENABLE_OPENVINO": "ON",
+        "MASODIK_ENABLE_TESTS": "ON",
+        "MASODIK_ENABLE_BENCHMARKS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "local-build",
+      "configurePreset": "local-msvc-ninja"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "local-test",
+      "configurePreset": "local-msvc-ninja",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}
+

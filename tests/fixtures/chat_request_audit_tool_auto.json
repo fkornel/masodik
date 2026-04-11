@@ -1,0 +1,38 @@
+{
+  "model": "gpt-oss-20b-int4-ov",
+  "messages": [
+    {
+      "role": "system",
+      "content": "Te egy helyi magyar nyelvu asszisztens vagy. Ha megfelelo tool erheto el, strukturalt tool hivatassal valaszolj."
+    },
+    {
+      "role": "user",
+      "content": "Mi van a workspace-ben? AGENT.md is van benne?"
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "exec",
+        "description": "Lokalis shell parancs futtatasa a kliens oldalan.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "description": "A futtatando shell parancs."
+            }
+          },
+          "required": [
+            "command"
+          ]
+        }
+      }
+    }
+  ],
+  "tool_choice": "auto",
+  "max_tokens": 128,
+  "temperature": 0.1,
+  "stream": false
+}

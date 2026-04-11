@@ -1,0 +1,16 @@
+{
+  "model": "gpt-oss-20b-int4-ov",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Ez a fixture a manual split long-context benchmark es smoke scenariok alap payloadja. A tenyleges futtato kesobb programozottan bovitheti a kontextust, de a metadata mar most jelzi a 128k celablakot."
+    }
+  ],
+  "max_tokens": 256,
+  "temperature": 0.0,
+  "stream": false,
+  "metadata": {
+    "target_context_tokens": 131072,
+    "scenario": "manual-split-long-context"
+  }
+}

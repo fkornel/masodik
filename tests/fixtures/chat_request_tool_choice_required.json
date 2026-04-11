@@ -1,0 +1,38 @@
+{
+  "model": "gpt-oss-20b-int4-ov",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Futtasd a statusz ellenorzest a megfelelo toollal."
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "exec",
+        "description": "Lokalis shell parancs futtatasa a kliens oldalan.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "command"
+          ]
+        }
+      }
+    }
+  ],
+  "tool_choice": {
+    "type": "function",
+    "function": {
+      "name": "exec"
+    }
+  },
+  "max_tokens": 96,
+  "temperature": 0.0,
+  "stream": false
+}

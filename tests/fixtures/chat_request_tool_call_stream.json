@@ -1,0 +1,38 @@
+{
+  "model": "gpt-oss-20b-int4-ov",
+  "messages": [
+    {
+      "role": "system",
+      "content": "Te egy helyi magyar nyelvu asszisztens vagy. Ha tool hivast kell inditani, strukturaltan epitsd fel a hivast."
+    },
+    {
+      "role": "user",
+      "content": "Deritsd ki a nyitott PR-eket egy elerheto toollal."
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "exec",
+        "description": "Lokalis shell parancs futtatasa a kliens oldalan.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "description": "A futtatando shell parancs."
+            }
+          },
+          "required": [
+            "command"
+          ]
+        }
+      }
+    }
+  ],
+  "tool_choice": "auto",
+  "max_tokens": 128,
+  "temperature": 0.1,
+  "stream": true
+}

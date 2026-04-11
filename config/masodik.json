@@ -1,0 +1,5 @@
+{
+  "profile": "config\\profiles\\b580-tail-split-128k.json",
+  "model_root": "build\\generated-manual-split-tail-128k-u8",
+  "mode": "tui"
+}

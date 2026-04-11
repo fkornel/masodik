@@ -1,0 +1,16 @@
+{
+  "model": "gpt-oss-20b-int4-ov",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Ezt a payloadot a 32768 tokenes benchmark scenariok alap fixture-ekent hasznaljuk. A tenyleges benchmark futtato kesobb nagyobb, programozottan generalhato kontextussal fog dolgozni."
+    }
+  ],
+  "max_tokens": 256,
+  "temperature": 0.0,
+  "stream": false,
+  "metadata": {
+    "target_context_tokens": 32768,
+    "scenario": "long-context-baseline"
+  }
+}
