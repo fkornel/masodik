@@ -80,7 +80,9 @@ cmake --build build --target masodik-streaming-smoke
 
 A `config/masodik.json` tartalmazza az alapértelmezett profilt és model-root-ot. A TUI közvetlenül hívja a C++ pipeline-t, nincs HTTP overhead.
 
-Funkciógombok: F1 (Súgó), F2 (Új chat), F5 (Újratöltés), F10 (Web be/ki), F12 (Diagnosztika), Esc (Kilépés).
+Funkciógombok: F1 (Súgó), F2 (Új chat), F5 (Újratöltés), F9 (Web be/ki), F10 (Kilépés), F12 (Diagnosztika).
+
+Fejlesztői hot-reload: `.\dev.ps1` — figyeli a build könyvtárat, új exe esetén újraindítja a TUI-t.
 
 ### HTTP szerver indítás (--serve mód)
 

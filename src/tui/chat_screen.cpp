@@ -4,7 +4,7 @@
 
 namespace masodik::tui {
 
-ftxui::Element render_chat_screen(const ChatState& state) {
+ftxui::Element render_chat_screen(const ChatState& state, int iter) {
     using namespace ftxui;
 
     Elements message_elements;
@@ -51,10 +51,14 @@ ftxui::Element render_chat_screen(const ChatState& state) {
         message_elements.push_back(text(""));
     }
 
-    auto chat_area = vbox(std::move(message_elements)) | flex | yframe;
+    // A chat terulet aljahoz gorgetjuk a focusPositionRelative(0,1)-gyel
+    // de NEM adunk focus-t egyetlen elemnek sem — igy a terminal kurzor
+    // (zold negyzet) nem jelenik meg a chat teruleten, hanem az input
+    // mezoben marad.
+    auto chat_area = vbox(std::move(message_elements)) | flex | yframe | focusPositionRelative(0.0f, 1.0f);
 
     return vbox({
-        text(" masodik chat ") | bold | color(Color::Cyan) | center,
+        text(" masodik" + (iter > 0 ? " #" + std::to_string(iter) : "") + " ") | bold | color(Color::Cyan) | center,
         separator(),
         chat_area,
     });

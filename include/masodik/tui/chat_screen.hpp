@@ -7,6 +7,7 @@
 namespace masodik::tui {
 
 // A chat kepernyot rendereli — uzenetek listaja scrollable teruleten.
-ftxui::Element render_chat_screen(const ChatState& state);
+// Az iter szam a fejlecben jelenik meg (build iteracio).
+ftxui::Element render_chat_screen(const ChatState& state, int iter = 0);
 
 }  // namespace masodik::tui

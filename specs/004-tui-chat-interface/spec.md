@@ -2,7 +2,7 @@
 
 **Feature Branch**: `004-tui-chat-interface`  
 **Created**: 2026-04-08  
-**Status**: Draft  
+**Status**: Complete  
 **Input**: User description: "Magyar nyelvu TUI chat interfesz a masodik alkalmazashoz, modell betoltessel, funkcio billentyukkel es billentyuzet-elso navigacioval."
 
 ## User Scenarios & Testing *(mandatory)*
@@ -92,14 +92,20 @@ Felhasznalokent szeretnem a chat elozményeket visszagorgethni, hogy korabboi ke
 - **FR-006**: A rendszer **MUST** allapotsorban folyamatosan jelezze a gep eroforrasait (CPU terheles, dGPU VRAM, iGPU VRAM, RAM — szazalekos es abszolut ertekkel, grafikus ASCII progress bar-okkal), a context kihasznaltsagot (szazalekos es grafikus), es a generalasi sebesseget (tok/s). A modell neve NEM szukseges az allapotsorban — az a diagnosztikai kepernyore (F12) tartozik
 - **FR-007**: A rendszer **MUST** magyar nyelvu feliratokat, uzeketeket es surgoet hasznaljon
 - **FR-008**: A rendszer **MUST** kezelje a terminal atmeretezeset anelkul, hogy osszeomlana vagy vizualisan hibas lenne
-- **FR-009**: A rendszer **MUST** tisztan kezelje a Ctrl+C megszakitast es az Esc billentyut (megerosito kerdes kilepés elott)
+- **FR-009**: A rendszer **MUST** az F10 funkcio billentyuvel biztositsa a kilepest (megerosito kerdes utan). A Ctrl+C NEM allitja le az alkalmazast — helyette dinamikus hint uzenetet mutat a lablecben ("Hasznald az F10-et"). Az Esc modal ablakokat zar, nem lep ki.
 - **FR-010**: A rendszer **MUST** tamogassa a chat elozmeny gorgeteset (Page Up/Page Down)
 - **FR-011**: A rendszer **MUST** a modell gondolkodas reszet (analysis) vizualisan elkuloniteni a vegso valasztol (osszecsukhato vagy halvanyabb szinnel)
 - **FR-012**: A rendszer **MUST** a TUI-bol kozvetlenul, HTTP reteg nelkul vegezni az inferencia-t — a pipeline C++ szinten hivodik, nem REST API-n keresztul
-- **FR-013**: A rendszer **MUST** lehetove tenni az OpenAI-kompatibilis HTTP webszerver be- es kikapcsolasat egy funkcio billentyuvel (pl. F10), a webszerver nem indul automatikusan a TUI-val
+- **FR-013**: A rendszer **MUST** lehetove tenni az OpenAI-kompatibilis HTTP webszerver be- es kikapcsolasat az F9 funkcio billentyuvel, a webszerver nem indul automatikusan a TUI-val
 - **FR-014**: A rendszer **MUST** az allapotsorban jelezni, ha a webszerver aktiv (port szam megjelenites csak aktiv allapotban)
 - **FR-015**: A rendszer **MUST** valos idoben monitorozni es az allapotsorban megjeleninteni a rendszer eroforrasait: CPU szazalekos terheles, dGPU VRAM (foglalt/osszes GB), iGPU VRAM (foglalt/osszes GB), RAM (foglalt/osszes GB) — mindegyik grafikus ASCII progress bar-ral es szazalekos kijelzessel
 - **FR-016**: A rendszer **MUST** a context szamlalot a chat soran valoban novelni az elhasznalt tokenek szamanak megfeleloen, es szazalekos + grafikus progress bar formaban is megjelenireni
+- **FR-017**: A rendszer **MUST** az allapotsorban megjelenireni az alkalmazas uptime-jat (futo ido masodpercben/percben/oraban)
+- **FR-018**: A rendszer **MUST** az allapotsorban megjelenireni a build iteracio szamot (#iter), amely a dev.ps1 hot-reload script altal novelodik
+- **FR-019**: A rendszer **MUST** a Ctrl+C lenyomasakor dinamikus hint uzenetet megjelenireni a lablecben halvany sargaval ("Kilepeshez hasznald az F10 billentyut."), amely 3 masodperc mulva automatikusan eltunik
+- **FR-020**: A rendszer **MUST** a CPU terhelest per-core hoteerkep formajaban megjelenireni (20 szegmens, 8 P-core cyan arnyalat, 12 E-core kek arnyalat), ahol a szin intensitasa a terheltseget jelzi
+- **FR-021**: A rendszer **MUST** az aktualis CPU frekvenciat dinamikusan megjelenireni GHz-ben (a WMI PercentProcessorPerformance alapjan, Task Manager-rel megegyezo ertek)
+- **FR-022**: A rendszer **MUST** a GPU VRAM hasznalatot a WMI Performance Counters (Win32_PerfFormattedData_GPUPerformanceCounters_GPUAdapterMemory) alapjan megjeleniteni, amely pontosan megegyezik a Task Manager ertekevel
 
 ### Key Entities
 
@@ -123,8 +129,10 @@ Felhasznalokent szeretnem a chat elozményeket visszagorgethni, hogy korabboi ke
 ## Assumptions
 
 - A TUI kozvetlenul hivja a C++ pipeline-t (LlmPipelineService, EmbeddingPipelineService) — nincs HTTP reteg a TUI es a modell kozott, az inferencia hardver-kozeli es memoriakezelés optimalis
-- Az OpenAI-kompatibilis HTTP webszerver NEM indul el a TUI-val egyutt — ez egy kulon funkciogombbal (pl. F10) kapcsolhato be/ki, igy a REST endpointok csak igeny eseten fogyasztanak eroforrasokat
+- Az OpenAI-kompatibilis HTTP webszerver NEM indul el a TUI-val egyutt — F9-cel kapcsolhato be/ki
 - A cel platform Windows terminál (Windows Terminal, cmd.exe, PowerShell) — a TUI-nak ezeken kell mukodnie
 - A TUI egyetlen felhasznalot szolgal ki lokalis gepen — nincs tobbfelhasznalós tamogatas
 - A meglevo profilok (32k tail-split, 128k tail-split) valtoztatalanul hasznalhatoak
-- Az F1-F12 funkcio billentyuk kiosztasa a tervezes soran veglegesitheto
+- Funkcio billentyuk vegleges kiosztasa: F1 Sugo, F2 Uj chat, F5 Ujratolt, F9 Web be/ki, F10 Kilepes, F12 Diagnosztika
+- A dev.ps1 hot-reload script a MASODIK_ITER kornyezeti valtozoval adja at az iter szamot az alkalmazasnak
+- A Ctrl+C nem allitja le az alkalmazast — ez szandekok, mert a terminal ablakbol masolasra hasznalhato

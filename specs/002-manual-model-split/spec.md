@@ -2,7 +2,7 @@
 
 **Feature Branch**: `002-manual-model-split`  
 **Created**: 2026-04-05  
-**Status**: Active (reopened 2026-04-07 — US4: 128k deep split)  
+**Status**: Complete (US4: 128k tail-split profil mukodik)  
 **Input**: User description: "A gpt-oss-20b modell stabil kiszolgalasahoz szukseg van a modell ket reszre vagasara, ahol az elso resz az elso gyorsiton, a masodik resz a masodik gyorsiton fut, es a ket szakasz kozott a hidden state atadas kezzel tortenik."
 
 ## User Scenarios & Testing *(mandatory)*

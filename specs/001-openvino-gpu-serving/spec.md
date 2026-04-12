@@ -2,7 +2,7 @@
 
 **Feature Branch**: `001-openvino-gpu-serving`  
 **Created**: 2026-04-03  
-**Status**: Draft  
+**Status**: Complete  
 **Input**: User description: "A 001-es feature celja a mar letoltott helyi modell ujrafelhasznalasaval egy OpenAI-kompatibilis helyi kiszolgalas, ahol a reszleges GPU+CPU gyorsitas kozvetlen modellbetoltessel es sajat szerverreteggel valosul meg."
 
 ## User Scenarios & Testing *(mandatory)*

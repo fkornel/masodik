@@ -69,9 +69,11 @@ masodik.exe
 | F2 | Uj chat | Jelenlegi beszelgetes torlese, uj inditasa |
 | F3 | Profil valtas | 32k / 128k profil kozott valtas |
 | F5 | Modell ujratoltés | Pipeline ujrainicializalas |
-| F10 | Webszerver be/ki | HTTP endpoint inditasa/megallitasa |
+| F9 | Webszerver be/ki | HTTP endpoint inditasa/megallitasa |
+| F10 | Kilepes | Megerosito kerdes utan kilepes (univerzalis) |
 | F12 | Diagnosztika | Health allapot reszletes megjelenitese |
-| Esc | Kilepes | Megerosito kerdes utan kilepes |
+| Esc | Modal bezaras | Modal ablakok bezarasa (NEM kilepes) |
+| Ctrl+C | Hint | Hint uzenet: "Hasznald az F10-et" (nem lep ki) |
 | Page Up/Down | Gorgetes | Chat elozmeny gorgetese |
 | Enter | Kuldes | Uzenet kuldese |
 | Shift+Enter | Uj sor | Tobbsoros uzenet bevitele |

@@ -1,0 +1,13 @@
+# File created with: OpenVINO Model Server 2026.1.0.72cc0624
+# A fajl baseline sablon; a launcher kesobb runtime-specifikus ertekekkel materializalhatja.
+model_config_list: {
+  config: {
+    name: "gpt-oss-20b-int4-ov"
+    base_path: "C:\\Users\\jezus\\AppData\\Local\\Programs\\AI Playground\\resources\\models\\LLM\\openvino\\OpenVINO---gpt-oss-20b-int4-ov"
+    target_device: "GPU.0"
+    plugin_config: "{\"CACHE_DIR\":\"cache\"}"
+    stateful: true
+    max_num_seqs: 256
+    enable_prefix_caching: true
+  }
+}

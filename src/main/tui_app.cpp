@@ -87,6 +87,28 @@ TuiArguments parse_tui_arguments(const int argc, char** argv) {
 
 }  // namespace
 
+// Globalis Ctrl+C kezeles — a TUI-ban nem all le, hanem hint uzenetet mutat.
+// A hint_message pointer-t a handler allitja, a monitor thread torolni fogja 3 sec mulva.
+namespace {
+    std::atomic<int> ctrl_c_count = 0;
+    std::shared_ptr<masodik::tui::StatusBarInfo> g_status_info;
+    ftxui::ScreenInteractive* g_screen = nullptr;
+
+    BOOL WINAPI tui_console_ctrl_handler(DWORD signal) {
+        if (signal == CTRL_C_EVENT || signal == CTRL_BREAK_EVENT) {
+            ++ctrl_c_count;
+            if (g_status_info) {
+                g_status_info->hint_message = "Kilepeshez hasznald az F10 billentyut.";
+            }
+            if (g_screen) {
+                g_screen->Post(ftxui::Event::Custom);
+            }
+            return TRUE;  // Kezeltuk — NEM all le a process
+        }
+        return FALSE;
+    }
+}
+
 int run_tui_app(int argc, char** argv) {
     const auto args = parse_tui_arguments(argc, argv);
 
@@ -94,112 +116,186 @@ int run_tui_app(int argc, char** argv) {
         args.profile_path, args.model_root, args.repo_root);
 
     auto screen = ftxui::ScreenInteractive::Fullscreen();
+    g_screen = &screen;
+
+    // A Ctrl+C NEM allitja le az alkalmazast — F10 a kilepes.
+    // Harom retegu vedelem:
+    // 1. ForceHandleCtrlC(false) — az FTXUI event szinten ne hivjon SIGABRT-ot
+    // 2. SetConsoleCtrlHandler — a Windows console signal szinten elkapjuk
+    // 3. ENABLE_PROCESSED_INPUT kikapcsolasa — a Windows kernel ne kuldjoen SIGINT-et
+    screen.ForceHandleCtrlC(false);
+
+    // A Windows console ENABLE_PROCESSED_INPUT flag kikapcsolasa megakadalyozza,
+    // hogy a Ctrl+C SIGINT signal-t generaljon. Igy a Ctrl+C csak egy sima
+    // billentyulenyomasdkent erkezik az FTXUI event loop-ba.
+    {
+        HANDLE stdin_handle = GetStdHandle(STD_INPUT_HANDLE);
+        DWORD console_mode = 0;
+        GetConsoleMode(stdin_handle, &console_mode);
+        // ENABLE_PROCESSED_INPUT = 0x0001 — ha aktiv, a Ctrl+C SIGINT-et general
+        console_mode &= ~0x0001U;
+        SetConsoleMode(stdin_handle, console_mode);
+    }
 
     // --- Allapot ---
-    auto loading_state = std::make_shared<masodik::tui::LoadingState>();
-    loading_state->profile_name = service_config.active_profile;
-    loading_state->model_name = service_config.active_model;
-
     auto chat_state = std::make_shared<masodik::tui::ChatState>();
-    std::mutex chat_mutex;  // Chat allapot vedese a streaming szaltol
+    std::mutex chat_mutex;
 
     auto status_info = std::make_shared<masodik::tui::StatusBarInfo>();
+    g_status_info = status_info;
+
+    SetConsoleCtrlHandler(tui_console_ctrl_handler, TRUE);
     status_info->model_name = service_config.active_model;
     status_info->device_profile = service_config.effective_device;
     status_info->context_total = service_config.generation_config.desired_context_tokens;
-    status_info->state = "Betoltes...";
+    status_info->state = "Kesz";  // Azonnal kesz — a modell majd lazy loading-gal toltodik
 
-    // --- Pipeline ---
+    if (const char* iter_env = std::getenv("MASODIK_ITER"); iter_env != nullptr) {
+        try { status_info->iter = std::stoi(iter_env); } catch (...) {}
+    }
+    const auto app_start_time = std::chrono::steady_clock::now();
+
+    // --- Pipeline (lazy loading) ---
+    // A modell NEM toltodik be az indulaskor. Csak az elso uzenet kuldesekor
+    // inicializalodik. Ha 10 percig nincs hasznalat, automatikusan offload-olodik.
     std::shared_ptr<masodik::genai::LlmPipelineService> pipeline;
     std::shared_ptr<masodik::genai::EmbeddingPipelineService> embedding;
-
-    std::atomic<bool> loading_done = false;
-    std::atomic<bool> loading_error = false;
+    std::atomic<bool> pipeline_loaded = false;
+    std::atomic<bool> loading_in_progress = false;
     std::string loading_error_message;
+    // Ha az uzenet betoltes kozben erkezik, a betoltes utan automatikusan feldolgozzuk
+    std::atomic<bool> pending_send = false;
+    std::chrono::steady_clock::time_point last_activity_time = std::chrono::steady_clock::now();
+    constexpr int offload_timeout_seconds = 600;  // 10 perc inaktivitas utan offload
 
-    // Chat input szoveg — az FTXUI Input komponens irja/olvassa
+    // A pipeline betoltese — hivhato az elso uzenetkor vagy F5-tel
+    auto ensure_pipeline_loaded = [&]() {
+        if (pipeline_loaded && pipeline && pipeline->ready()) {
+            last_activity_time = std::chrono::steady_clock::now();
+            return true;
+        }
+        if (loading_in_progress) return false;
+
+        loading_in_progress = true;
+        status_info->state = "Betoltes...";
+        status_info->hint_message = "Modell betoltese folyamatban...";
+        screen.Post(ftxui::Event::Custom);
+
+        // Betoltes kulon szalon
+        std::thread([&]() {
+            try {
+                pipeline = std::make_shared<masodik::genai::LlmPipelineService>(service_config);
+                pipeline->initialize();
+
+                if (pipeline->ready()) {
+                    // Embedding betoltes (NPU)
+                    if (service_config.serving_profile.embedding_enabled && !embedding) {
+                        embedding = std::make_shared<masodik::genai::EmbeddingPipelineService>();
+                        embedding->initialize(
+                            service_config.serving_profile.embedding_model_path,
+                            service_config.serving_profile.embedding_device,
+                            service_config.serving_profile.embedding_model_name,
+                            service_config.serving_profile.embedding_reject_cpu_fallback);
+                    }
+                    pipeline_loaded = true;
+                    last_activity_time = std::chrono::steady_clock::now();
+                    status_info->state = "Kesz";
+                    status_info->hint_message.clear();
+                } else {
+                    loading_error_message = pipeline->status_message();
+                    status_info->state = "Hiba";
+                    status_info->hint_message = "Betoltesi hiba: " + loading_error_message;
+                }
+            } catch (const std::exception& error) {
+                loading_error_message = error.what();
+                status_info->state = "Hiba";
+                status_info->hint_message = "Betoltesi hiba: " + loading_error_message;
+            }
+            loading_in_progress = false;
+            screen.Post(ftxui::Event::Custom);
+        }).detach();
+
+        return false;
+    };
+
     std::string input_content;
-
-    // Streaming allapot
     std::atomic<bool> generating = false;
     std::chrono::steady_clock::time_point generation_start;
     std::atomic<int> generated_token_count = 0;
 
-    // Modal allapotok
     enum class ModalMode { none, help, quit_confirm, diagnostics };
     ModalMode modal_mode = ModalMode::none;
 
-    // Webszerver allapot (F10)
     std::unique_ptr<masodik::server::HttpServer> web_server;
     bool web_server_running = false;
 
-    // --- Betoltes szal ---
-    std::thread loading_thread([&]() {
-        try {
-            loading_state->stage_1 = "Betoltes...";
-            screen.Post(ftxui::Event::Custom);
+    // Kurzor villogas — stabil allapotvaltas masodpercenkent
+    // A monitor thread valtogtaja, a render transform olvassa.
+    std::atomic<bool> cursor_visible = true;
 
-            pipeline = std::make_shared<masodik::genai::LlmPipelineService>(service_config);
-            pipeline->initialize();
+    // Pipeline offload — felszabaditja az eroforrasokat
+    auto offload_pipeline = [&]() {
+        if (!pipeline_loaded || loading_in_progress || generating) return;
+        pipeline.reset();
+        embedding.reset();
+        pipeline_loaded = false;
+        status_info->state = "Kesz";
+        status_info->hint_message = "Modell offload-olva (10 perc inaktivitas).";
+        screen.Post(ftxui::Event::Custom);
+    };
 
-            if (pipeline->ready()) {
-                loading_state->stage_1 = "Kesz";
-                loading_state->stage_2 = "Kesz";
-            } else {
-                loading_state->stage_1 = "Hiba";
-                loading_error = true;
-                loading_error_message = pipeline->status_message();
-            }
-            screen.Post(ftxui::Event::Custom);
-
-            if (service_config.serving_profile.embedding_enabled) {
-                loading_state->embedding = "Betoltes...";
-                screen.Post(ftxui::Event::Custom);
-
-                embedding = std::make_shared<masodik::genai::EmbeddingPipelineService>();
-                embedding->initialize(
-                    service_config.serving_profile.embedding_model_path,
-                    service_config.serving_profile.embedding_device,
-                    service_config.serving_profile.embedding_model_name,
-                    service_config.serving_profile.embedding_reject_cpu_fallback);
-
-                loading_state->embedding = embedding->ready() ? "Kesz" : "Hiba";
-                screen.Post(ftxui::Event::Custom);
-            }
-
-            loading_done = true;
-            status_info->state = "Kesz";
-            screen.Post(ftxui::Event::Custom);
-        } catch (const std::exception& error) {
-            loading_error = true;
-            loading_error_message = error.what();
-            loading_done = true;
-            screen.Post(ftxui::Event::Custom);
-        }
-    });
+    // A streaming generalas inditasa — forward deklaracio
+    std::function<void()> start_generation;
 
     // --- Uzenet kuldese a pipeline-nak ---
     auto send_message = [&]() {
-        if (generating || !pipeline || !pipeline->ready()) return;
+        if (generating) return;
+
+        // Az uzenetet mindenkepp felrakjuk a chat-re (meg ha a modell nincs betoltve)
         std::string user_text;
         {
             std::lock_guard lock(chat_mutex);
             user_text = input_content;
+            while (!user_text.empty() && user_text.front() == ' ') user_text.erase(0, 1);
+            while (!user_text.empty() && user_text.back() == ' ') user_text.pop_back();
             if (user_text.empty()) return;
-            input_content.clear();
+            input_content = " ";
 
             // Felhasznaloi uzenet hozzaadasa
             chat_state->messages.push_back({
                 .role = masodik::tui::ChatMessage::Role::user,
                 .content = user_text,
             });
-            // Ures asszisztensi uzenet a streaminghez
+            // Asszisztensi uzenet — a varakozasi allapotot mutatja
             chat_state->messages.push_back({
                 .role = masodik::tui::ChatMessage::Role::assistant,
                 .is_streaming = true,
             });
             chat_state->generating = true;
         }
+        screen.Post(ftxui::Event::Custom);
+
+        // Lazy loading: ha a pipeline meg nincs betoltve, most toltjuk be
+        if (!pipeline_loaded || !pipeline || !pipeline->ready()) {
+            if (!ensure_pipeline_loaded()) {
+                // A betoltes elindult — az AI uzenetben jelezzuk
+                {
+                    std::lock_guard lock(chat_mutex);
+                    auto& ai_msg = chat_state->messages.back();
+                    ai_msg.content = "Varakozas: Modell betoltese...";
+                }
+                pending_send = true;
+                screen.Post(ftxui::Event::Custom);
+                return;
+            }
+        }
+        last_activity_time = std::chrono::steady_clock::now();
+        start_generation();
+    };
+
+    // A streaming generalas inditasa — a chat-ben mar van user + AI uzenet par,
+    // ez a fuggveny inditja a tenyleges pipeline hivast kulon szalon.
+    start_generation = [&]() {
         generating = true;
         generated_token_count = 0;
         generation_start = std::chrono::steady_clock::now();
@@ -216,7 +312,7 @@ int run_tui_app(int argc, char** argv) {
         screen.Post(ftxui::Event::Custom);
 
         // Streaming generalas kulon szalon
-        std::thread([&, user_text]() {
+        std::thread([&]() {
             try {
                 // OpenAI chat request osszeallitasa
                 masodik::api::ChatCompletionRequest request;
@@ -364,36 +460,34 @@ int run_tui_app(int argc, char** argv) {
 
     // --- FTXUI komponensek ---
     auto input_option = ftxui::InputOption::Default();
-    input_option.placeholder = "Ird be az uzeneted...";
-    input_option.multiline = false;
+    input_option.placeholder = "";
+    input_option.multiline = true;
+    // A fokuszalt input ne legyen inverz (feher hatter) — normal megjelenes.
+    // Normal megjelenes: nincs inverz hatter.
+    input_option.transform = [](ftxui::InputState state) {
+        return state.element;
+    };
+    input_content = " ";
     auto input_component = ftxui::Input(&input_content, input_option);
 
-    // Fo komponens: betoltes VAGY chat
+    // Fo komponens: mindig a chat kepernyo (nincs betoltesi kepernyo, lazy loading)
     auto main_renderer = ftxui::Renderer(input_component, [&] {
-        if (!loading_done) {
-            return masodik::tui::render_loading_screen(*loading_state);
-        }
-        if (loading_error && chat_state->messages.empty()) {
-            return ftxui::vbox({
-                ftxui::text("  HIBA a modell betoltesenel  ") | ftxui::bold | ftxui::color(ftxui::Color::Red),
-                ftxui::separator(),
-                ftxui::paragraph(loading_error_message) | ftxui::color(ftxui::Color::Yellow),
-                ftxui::separator(),
-                ftxui::text("Nyomj Esc-et a kilepeshez.") | ftxui::dim,
-            }) | ftxui::border;
-        }
-
         // Chat mod
         ftxui::Element chat_area;
         {
             std::lock_guard lock(chat_mutex);
-            chat_area = masodik::tui::render_chat_screen(*chat_state);
+            chat_area = masodik::tui::render_chat_screen(*chat_state, status_info->iter);
         }
 
         auto base_ui = ftxui::vbox({
             chat_area | ftxui::flex,
             ftxui::separator(),
-            input_component->Render() | ftxui::border,
+            ftxui::hbox({
+                ftxui::text(" > ") | ftxui::bold | ftxui::color(ftxui::Color::Green),
+                cursor_visible.load()
+                    ? (input_component->Render() | ftxui::flex)
+                    : (ftxui::text(input_content) | ftxui::flex),
+            }),
             ftxui::separator(),
             masodik::tui::render_status_bar(*status_info),
             masodik::tui::render_function_key_bar(),
@@ -421,21 +515,54 @@ int run_tui_app(int argc, char** argv) {
         }
         if (modal_mode == ModalMode::diagnostics) {
             auto health = pipeline ? pipeline->make_health_response() : masodik::api::HealthResponse{};
-            auto diag = ftxui::vbox({
+
+            // Embedding allapot kozvetlenul az EmbeddingPipelineService-bol
+            std::string emb_state = "Nem konfiguralt";
+            std::string emb_model;
+            std::string emb_device;
+            std::string emb_dimension;
+            if (embedding) {
+                const auto emb_info = embedding->model_info();
+                emb_state = std::string{embedding->state_string()};
+                emb_model = emb_info.model_name;
+                emb_device = emb_info.device;
+                if (emb_info.embedding_dimension > 0) {
+                    emb_dimension = std::to_string(emb_info.embedding_dimension) + " dim";
+                }
+                if (!embedding->last_error().empty()) {
+                    emb_state += " (" + embedding->last_error() + ")";
+                }
+            }
+
+            auto emb_color = ftxui::Color::Yellow;
+            if (emb_state == "ready") emb_color = ftxui::Color::Green;
+            else if (emb_state.find("failed") != std::string::npos) emb_color = ftxui::Color::Red;
+
+            ftxui::Elements diag_rows = {
                 ftxui::text("  Diagnosztika  ") | ftxui::bold | ftxui::color(ftxui::Color::Cyan) | ftxui::center,
                 ftxui::separator(),
-                ftxui::hbox({ ftxui::text("  Profil: ") | ftxui::bold, ftxui::text(health.active_profile) }),
-                ftxui::hbox({ ftxui::text("  Modell: ") | ftxui::bold, ftxui::text(health.active_model) }),
-                ftxui::hbox({ ftxui::text("  Eszkoz: ") | ftxui::bold, ftxui::text(health.effective_device) }),
-                ftxui::hbox({ ftxui::text("  Allapot: ") | ftxui::bold, ftxui::text(health.state) | ftxui::color(health.ready ? ftxui::Color::Green : ftxui::Color::Red) }),
-                ftxui::hbox({ ftxui::text("  Stage-1: ") | ftxui::bold, ftxui::text(health.stage_1_state) }),
-                ftxui::hbox({ ftxui::text("  Stage-2: ") | ftxui::bold, ftxui::text(health.stage_2_state) }),
-                ftxui::hbox({ ftxui::text("  Context: ") | ftxui::bold, ftxui::text(std::to_string(health.validated_context_tokens) + " token") }),
-                ftxui::hbox({ ftxui::text("  Embedding: ") | ftxui::bold, ftxui::text(health.embedding_state.empty() ? "N/A" : health.embedding_state) }),
-                ftxui::hbox({ ftxui::text("  Web: ") | ftxui::bold, ftxui::text(web_server_running ? ("Aktiv :" + std::to_string(service_config.bind_port)) : "Kikapcsolva") }),
+                ftxui::text("  Chat modell") | ftxui::bold,
+                ftxui::hbox({ ftxui::text("    Profil: ") | ftxui::dim, ftxui::text(health.active_profile) }),
+                ftxui::hbox({ ftxui::text("    Modell: ") | ftxui::dim, ftxui::text(health.active_model) }),
+                ftxui::hbox({ ftxui::text("    Eszkoz: ") | ftxui::dim, ftxui::text(health.effective_device) }),
+                ftxui::hbox({ ftxui::text("    Allapot: ") | ftxui::dim, ftxui::text(health.state) | ftxui::color(health.ready ? ftxui::Color::Green : ftxui::Color::Red) }),
+                ftxui::hbox({ ftxui::text("    Stage-1: ") | ftxui::dim, ftxui::text(health.stage_1_state) }),
+                ftxui::hbox({ ftxui::text("    Stage-2: ") | ftxui::dim, ftxui::text(health.stage_2_state) }),
+                ftxui::hbox({ ftxui::text("    Context: ") | ftxui::dim, ftxui::text(std::to_string(health.validated_context_tokens) + " token") }),
+                ftxui::separator(),
+                ftxui::text("  Embedding modell") | ftxui::bold,
+                ftxui::hbox({ ftxui::text("    Modell: ") | ftxui::dim, ftxui::text(emb_model.empty() ? "-" : emb_model) }),
+                ftxui::hbox({ ftxui::text("    Eszkoz: ") | ftxui::dim, ftxui::text(emb_device.empty() ? "-" : emb_device) }),
+                ftxui::hbox({ ftxui::text("    Dimenzio: ") | ftxui::dim, ftxui::text(emb_dimension.empty() ? "-" : emb_dimension) }),
+                ftxui::hbox({ ftxui::text("    Allapot: ") | ftxui::dim, ftxui::text(emb_state) | ftxui::color(emb_color) }),
+                ftxui::separator(),
+                ftxui::text("  Halozat") | ftxui::bold,
+                ftxui::hbox({ ftxui::text("    Web szerver: ") | ftxui::dim, ftxui::text(web_server_running ? ("Aktiv — " + service_config.bind_host + ":" + std::to_string(service_config.bind_port)) : "Kikapcsolva (F9)") }),
                 ftxui::separator(),
                 ftxui::text("  Nyomj Enter-t vagy Esc-et a bezarashoz.") | ftxui::dim | ftxui::center,
-            }) | ftxui::border | ftxui::clear_under | ftxui::center;
+            };
+
+            auto diag = ftxui::vbox(std::move(diag_rows)) | ftxui::border | ftxui::clear_under | ftxui::center;
             return ftxui::dbox({ base_ui | ftxui::dim, diag });
         }
 
@@ -444,6 +571,18 @@ int run_tui_app(int argc, char** argv) {
 
     // Billentyu kezeles
     auto event_handler = ftxui::CatchEvent(main_renderer, [&](ftxui::Event event) -> bool {
+        // F10 mindig a kilepes — modalban is, barhol is
+        if (event == ftxui::Event::F10) {
+            if (modal_mode == ModalMode::quit_confirm) {
+                // Mar megerositesben vagyunk — kilep
+                generating = false;
+                screen.Exit();
+                return true;
+            }
+            modal_mode = ModalMode::quit_confirm;
+            return true;
+        }
+
         // Modal ablak bezarasa Enter-rel vagy Esc-kel
         if (modal_mode != ModalMode::none && modal_mode != ModalMode::quit_confirm) {
             if (event == ftxui::Event::Return || event == ftxui::Event::Escape) {
@@ -453,7 +592,7 @@ int run_tui_app(int argc, char** argv) {
             return true;  // Modal modban minden billentyut elnyeljuk
         }
 
-        // Kilepes megerosites kezeles
+        // Kilepes megerosites kezeles (F10-bol erkeztunk ide)
         if (modal_mode == ModalMode::quit_confirm) {
             if (event.is_character()) {
                 const auto ch = event.character();
@@ -466,17 +605,22 @@ int run_tui_app(int argc, char** argv) {
                 modal_mode = ModalMode::none;
                 return true;
             }
-            if (event == ftxui::Event::Escape) {
+            if (event == ftxui::Event::Escape || event == ftxui::Event::Return) {
                 modal_mode = ModalMode::none;
                 return true;
             }
             return true;
         }
 
-        // Esc → kilepes megerosites
+        // Ctrl+C → hint uzenet, NEM kilepes
+        if (event == ftxui::Event::CtrlC) {
+            status_info->hint_message = "Kilepeshez hasznald az F10 billentyut.";
+            return true;  // Elnyeljuk — nem lep ki
+        }
+
+        // Esc → modal ablakok bezarasa (NEM kilepes!)
         if (event == ftxui::Event::Escape) {
-            modal_mode = ModalMode::quit_confirm;
-            return true;
+            return true;  // Elnyeljuk
         }
 
         // F1 → surgo
@@ -489,13 +633,13 @@ int run_tui_app(int argc, char** argv) {
         if (event == ftxui::Event::F2 && !generating) {
             std::lock_guard lock(chat_mutex);
             chat_state->messages.clear();
-            input_content.clear();
+            input_content = " ";  // Space workaround a kurzor lathatosagaert
             status_info->context_used = 0;
             return true;
         }
 
-        // F10 → webszerver be/ki
-        if (event == ftxui::Event::F10 && pipeline && pipeline->ready()) {
+        // F9 → webszerver be/ki
+        if (event == ftxui::Event::F9 && pipeline && pipeline->ready()) {
             if (web_server_running) {
                 // Webszerver leallitasa
                 if (web_server) {
@@ -525,65 +669,15 @@ int run_tui_app(int argc, char** argv) {
             return true;
         }
 
-        // F5 → modell ujratoltés
-        if (event == ftxui::Event::F5 && !generating) {
-            // Webszerver leallitasa ha fut
+        // F5 → modell ujratoltés (offload + lazy reload)
+        if (event == ftxui::Event::F5 && !generating && !loading_in_progress) {
             if (web_server) { web_server->stop(); web_server.reset(); }
             web_server_running = false;
             status_info->web_server_active = false;
-
-            // Pipeline reset
-            loading_done = false;
-            loading_error = false;
-            loading_error_message.clear();
-            loading_state->stage_1 = "Varakozas...";
-            loading_state->stage_2 = "Varakozas...";
-            loading_state->embedding = "Varakozas...";
-            status_info->state = "Betoltes...";
-            status_info->tokens_per_second = 0.0;
-
-            // Ujratoltés kulon szalon
-            std::thread([&]() {
-                try {
-                    loading_state->stage_1 = "Betoltes...";
-                    screen.Post(ftxui::Event::Custom);
-
-                    pipeline = std::make_shared<masodik::genai::LlmPipelineService>(service_config);
-                    pipeline->initialize();
-
-                    if (pipeline->ready()) {
-                        loading_state->stage_1 = "Kesz";
-                        loading_state->stage_2 = "Kesz";
-                    } else {
-                        loading_state->stage_1 = "Hiba";
-                        loading_error = true;
-                        loading_error_message = pipeline->status_message();
-                    }
-                    screen.Post(ftxui::Event::Custom);
-
-                    if (service_config.serving_profile.embedding_enabled) {
-                        loading_state->embedding = "Betoltes...";
-                        screen.Post(ftxui::Event::Custom);
-                        embedding = std::make_shared<masodik::genai::EmbeddingPipelineService>();
-                        embedding->initialize(
-                            service_config.serving_profile.embedding_model_path,
-                            service_config.serving_profile.embedding_device,
-                            service_config.serving_profile.embedding_model_name,
-                            service_config.serving_profile.embedding_reject_cpu_fallback);
-                        loading_state->embedding = embedding->ready() ? "Kesz" : "Hiba";
-                        screen.Post(ftxui::Event::Custom);
-                    }
-
-                    loading_done = true;
-                    status_info->state = "Kesz";
-                    screen.Post(ftxui::Event::Custom);
-                } catch (const std::exception& error) {
-                    loading_error = true;
-                    loading_error_message = error.what();
-                    loading_done = true;
-                    screen.Post(ftxui::Event::Custom);
-                }
-            }).detach();
+            // Offload a jelenlegi pipeline-t
+            offload_pipeline();
+            // Azonnal ujratoltjuk
+            ensure_pipeline_loaded();
             return true;
         }
 
@@ -594,7 +688,7 @@ int run_tui_app(int argc, char** argv) {
         }
 
         // Enter → uzenet kuldese (ha nem ures es nem general)
-        if (event == ftxui::Event::Return && loading_done && !generating) {
+        if (event == ftxui::Event::Return && !generating && !loading_in_progress) {
             if (!input_content.empty()) {
                 send_message();
                 return true;
@@ -608,11 +702,60 @@ int run_tui_app(int argc, char** argv) {
     // Masodpercenkent lekerdezes, az allapotsor frissitese.
     auto resource_monitor = std::make_shared<masodik::tui::ResourceMonitor>();
     std::atomic<bool> monitor_running = true;
+    int hint_clear_countdown = 0;
     std::thread monitor_thread([&]() {
         while (monitor_running) {
             status_info->resources = resource_monitor->snapshot();
+            // Uptime frissites
+            const auto elapsed = std::chrono::steady_clock::now() - app_start_time;
+            status_info->uptime_seconds = static_cast<int>(
+                std::chrono::duration_cast<std::chrono::seconds>(elapsed).count());
+
+            // Ha a modell betoltodott es van varakozo uzenet, a streaming generalast elindítjuk
+            if (pending_send && pipeline_loaded && !generating && !loading_in_progress && pipeline && pipeline->ready()) {
+                pending_send = false;
+                // Az AI uzenet frissitese
+                {
+                    std::lock_guard lock(chat_mutex);
+                    if (!chat_state->messages.empty()) {
+                        auto& ai_msg = chat_state->messages.back();
+                        if (ai_msg.role == masodik::tui::ChatMessage::Role::assistant) {
+                            ai_msg.content.clear();  // Toroljuk a "Varakozas" szoveget
+                        }
+                    }
+                }
+                // A start_generation lambda-t hivjuk (lasd lentebb)
+                start_generation();
+            }
+
+            // Hint uzenet automatikus torlese 3 masodperc utan
+            if (!status_info->hint_message.empty()) {
+                ++hint_clear_countdown;
+                if (hint_clear_countdown >= 3) {
+                    status_info->hint_message.clear();
+                    hint_clear_countdown = 0;
+                }
+            } else {
+                hint_clear_countdown = 0;
+            }
+
+            // Auto-offload: ha a pipeline betoltve van es 10 percig nem volt hasznalva
+            if (pipeline_loaded && !generating && !loading_in_progress) {
+                const auto idle_seconds = std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::steady_clock::now() - last_activity_time).count();
+                if (idle_seconds >= offload_timeout_seconds) {
+                    offload_pipeline();
+                }
+            }
+
+            // Kurzor villogas: stabil allapotvaltas masodpercenkent.
+            // A transform olvassa a cursor_visible erteket es donti el
+            // hogy a focus (kurzor) lathato-e az input mezoben.
+            cursor_visible = !cursor_visible.load();
+
             screen.Post(ftxui::Event::Custom);
-            for (int i = 0; i < 10 && monitor_running; ++i) {
+            const int sleep_ms = 1000;
+            for (int i = 0; i < sleep_ms / 100 && monitor_running; ++i) {
                 std::this_thread::sleep_for(std::chrono::milliseconds{100});
             }
         }
@@ -622,15 +765,15 @@ int run_tui_app(int argc, char** argv) {
 
     monitor_running = false;
     generating = false;
+    SetConsoleCtrlHandler(tui_console_ctrl_handler, FALSE);
+    g_status_info.reset();
+    g_screen = nullptr;
     if (monitor_thread.joinable()) {
         monitor_thread.join();
     }
     if (web_server) {
         web_server->stop();
         web_server.reset();
-    }
-    if (loading_thread.joinable()) {
-        loading_thread.join();
     }
 
     return 0;

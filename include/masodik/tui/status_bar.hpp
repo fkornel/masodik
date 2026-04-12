@@ -17,6 +17,9 @@ struct StatusBarInfo {
     std::string state = "Betoltes...";
     bool web_server_active = false;
     int web_server_port = 0;
+    int iter = 0;                 // Build iteracio szam
+    int uptime_seconds = 0;       // Alkalmazas futo ideje masodpercben
+    std::string hint_message;     // Dinamikus hint uzenet (halvany sarga, eltunik)
     ResourceSnapshot resources;   // CPU, RAM, dGPU, iGPU valos ideju adatok
 };
 
