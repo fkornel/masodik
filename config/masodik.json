@@ -1,5 +1,14 @@
 {
   "profile": "config\\profiles\\b580-tail-split-128k.json",
   "model_root": "build\\generated-manual-split-tail-128k-u8",
-  "mode": "tui"
+  "mode": "tui",
+  "user_name": "Kornel",
+  "agent_name": "Szilvabot",
+  "agent_prompt_file": "SYSTEM_PROMPT.md",
+  "chat_history_file": "data\\chat-history.jsonl",
+  "max_tokens": 1024,
+  "temperature": 0.6,
+  "repetition_penalty": 1.15,
+  "top_p": 0.85,
+  "top_k": 40
 }

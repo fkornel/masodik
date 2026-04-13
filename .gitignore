@@ -35,6 +35,9 @@ openvino.genai-*/
 *.onnx
 *.xml.bin
 
+# Chat history (JSONL fajlok, felhasznalo-specifikus)
+data/
+
 .DS_Store
 Thumbs.db
 *.tmp

@@ -1,4 +1,4 @@
-﻿# CLAUDE.md
+# CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -78,9 +78,14 @@ cmake --build build --target masodik-streaming-smoke
 .\run.ps1
 ```
 
-A `config/masodik.json` tartalmazza az alapértelmezett profilt és model-root-ot. A TUI közvetlenül hívja a C++ pipeline-t, nincs HTTP overhead.
+A `config/masodik.json` tartalmazza az alapértelmezett profilt, model-root-ot, valamint a chat személyre szabási beállításokat (user_name, agent_name, agent_prompt_file, chat_history_file). A TUI közvetlenül hívja a C++ pipeline-t, nincs HTTP overhead.
+
+Chat funkciók: [Kornél] és [Szilvabot] nevek, markdown renderelés (bold, kódblokk, inline kód), system prompt (SYSTEM_PROMPT.md), JSONL chat history (data/chat-history.jsonl), Esc megszakítás, üzenet szerkesztés (fel/le nyíl), paste támogatás, kontextus méret ellenőrzés.
 
 Funkciógombok: F1 (Súgó), F2 (Új chat), F5 (Újratöltés), F9 (Web be/ki), F10 (Kilépés), F12 (Diagnosztika).
+Billentyűk: Enter (küldés), Alt+Enter (új sor), Esc (megszakítás/browse kilépés), Fel/Le nyíl (üzenet navigáció), Ctrl+U (mező törlés).
+
+Generálási paraméterek: a `config/masodik.json`-ban `max_tokens`, `temperature`, `top_p`, `top_k`, `repetition_penalty` felülírják a profil értékeket.
 
 Fejlesztői hot-reload: `.\dev.ps1` — figyeli a build könyvtárat, új exe esetén újraindítja a TUI-t.
 
